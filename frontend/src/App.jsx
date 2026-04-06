@@ -1,356 +1,78 @@
-import { useEffect, useMemo, useState } from "react";
-import AuthPage from "./pages/AuthPage";
-import ContactPage from "./pages/ContactPage";
-import HomePage from "./pages/HomePage";
-import ResourcesPage from "./pages/ResourcesPage";
-import SupportServicesPage from "./pages/SupportServicesPage";
-import { apiFetch, clearSession, getSession, saveSession } from "./services/api";
-
-const availablePages = ["home", "resources", "support", "contact", "login", "register"];
-
-function emptyResourceForm() {
-  return {
-    title: "",
-    description: "",
-    type: "LEGAL_RIGHTS",
-    contactLink: ""
-  };
-}
+import { useState } from "react";
+import LoginPage from "./pages/LoginPage";
+import RegisterPage from "./pages/RegisterPage";
+import DashboardPage from "./pages/DashboardPage";
 
 export default function App() {
-  const [activePage, setActivePage] = useState("home");
-  const [session, setSession] = useState(() => getSession());
-  const [resources, setResources] = useState([]);
-  const [providers, setProviders] = useState([]);
-  const [supportRequests, setSupportRequests] = useState([]);
-  const [adminUsers, setAdminUsers] = useState([]);
-  const [adminOverview, setAdminOverview] = useState(null);
-  const [resourceForm, setResourceForm] = useState(emptyResourceForm());
-  const [resourceEditingId, setResourceEditingId] = useState(null);
-  const [feedback, setFeedback] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [activePage, setActivePage] = useState("login");
+  const [user, setUser] = useState(() => {
+    const storedUser = localStorage.getItem("loggedInUser");
+    return storedUser ? JSON.parse(storedUser) : null;
+  });
 
-  const user = session?.user || null;
-
-  const navItems = useMemo(() => {
-    const base = [
-      { key: "home", label: "Home" },
-      { key: "resources", label: "Resources" },
-      { key: "support", label: "Support Services" },
-      { key: "contact", label: "Contact" }
-    ];
-
-    if (!user) {
-      return [...base, { key: "login", label: "Login" }, { key: "register", label: "Register" }];
-    }
-
-    return base;
-  }, [user]);
-
-  useEffect(() => {
-    loadPortalData();
-  }, [session?.token]);
-
-  async function loadPortalData() {
-    setLoading(true);
-    setError("");
-
-    try {
-      const [resourceData, providerData] = await Promise.all([
-        apiFetch(session?.token ? "/resources" : "/resources/public"),
-        apiFetch("/users/providers")
-      ]);
-
-      setResources(resourceData);
-      setProviders(providerData);
-
-      if (session?.token) {
-        const supportData = await apiFetch("/support-requests");
-        setSupportRequests(supportData);
-
-        if (user?.role === "ADMIN") {
-          const [usersData, overviewData] = await Promise.all([
-            apiFetch("/admin/users"),
-            apiFetch("/admin/overview")
-          ]);
-          setAdminUsers(usersData);
-          setAdminOverview(overviewData);
-        } else {
-          setAdminUsers([]);
-          setAdminOverview(null);
-        }
-      } else {
-        setSupportRequests([]);
-        setAdminUsers([]);
-        setAdminOverview(null);
-      }
-    } catch (loadError) {
-      setError(loadError.message);
-      if (session?.token) {
-        clearSession();
-        setSession(null);
-      }
-    } finally {
-      setLoading(false);
-    }
+  let content;
+  if (user) {
+    content = <DashboardPage user={user} onLogout={() => setUser(null)} />;
+  } else if (activePage === "register") {
+    content = (
+      <RegisterPage
+        onRegistered={() => setActivePage("login")}
+        onSwitch={() => setActivePage("login")}
+      />
+    );
+  } else {
+    content = (
+      <LoginPage
+        onLogin={setUser}
+        onSwitch={() => setActivePage("register")}
+      />
+    );
   }
-
-  async function handleAuthentication(path, payload) {
-    setError("");
-    setFeedback("");
-
-    try {
-      const response = await apiFetch(path, {
-        method: "POST",
-        body: JSON.stringify(payload)
-      });
-      const nextSession = { token: response.token, user: response.user };
-      saveSession(nextSession);
-      setSession(nextSession);
-      setActivePage("home");
-      setFeedback(response.message);
-    } catch (requestError) {
-      setError(requestError.message);
-    }
-  }
-
-  function handleLogout() {
-    clearSession();
-    setSession(null);
-    setActivePage("home");
-    setFeedback("You have been signed out.");
-    setError("");
-  }
-
-  async function handleResourceSave(payload) {
-    try {
-      await apiFetch(resourceEditingId ? `/resources/${resourceEditingId}` : "/resources", {
-        method: resourceEditingId ? "PUT" : "POST",
-        body: JSON.stringify(payload)
-      });
-      setResourceEditingId(null);
-      setResourceForm(emptyResourceForm());
-      setFeedback(resourceEditingId ? "Resource updated." : "Resource created.");
-      await loadPortalData();
-    } catch (requestError) {
-      setError(requestError.message);
-    }
-  }
-
-  async function handleResourceDelete(resourceId) {
-    try {
-      await apiFetch(`/resources/${resourceId}`, { method: "DELETE" });
-      setFeedback("Resource deleted.");
-      await loadPortalData();
-    } catch (requestError) {
-      setError(requestError.message);
-    }
-  }
-
-  async function handleSupportRequestCreate(payload) {
-    try {
-      await apiFetch("/support-requests", {
-        method: "POST",
-        body: JSON.stringify(payload)
-      });
-      setFeedback("Support request submitted.");
-      await loadPortalData();
-    } catch (requestError) {
-      setError(requestError.message);
-    }
-  }
-
-  async function handleSupportStatusUpdate(id, payload) {
-    try {
-      await apiFetch(`/support-requests/${id}/status`, {
-        method: "PATCH",
-        body: JSON.stringify(payload)
-      });
-      setFeedback("Support request updated.");
-      await loadPortalData();
-    } catch (requestError) {
-      setError(requestError.message);
-    }
-  }
-
-  async function handleLegalAdvice(id, legalAdvice) {
-    if (!legalAdvice) {
-      setError("Legal advice cannot be empty.");
-      return;
-    }
-
-    try {
-      await apiFetch(`/support-requests/${id}/legal-advice`, {
-        method: "POST",
-        body: JSON.stringify({ legalAdvice })
-      });
-      setFeedback("Legal advice saved.");
-      await loadPortalData();
-    } catch (requestError) {
-      setError(requestError.message);
-    }
-  }
-
-  async function handleCounsellingNote(id, notes) {
-    if (!notes) {
-      setError("Counselling note cannot be empty.");
-      return;
-    }
-
-    try {
-      await apiFetch(`/support-requests/${id}/counselling-notes`, {
-        method: "POST",
-        body: JSON.stringify({ notes })
-      });
-      setFeedback("Counselling note saved.");
-      await loadPortalData();
-    } catch (requestError) {
-      setError(requestError.message);
-    }
-  }
-
-  async function handleContact(payload) {
-    try {
-      const response = await apiFetch("/contact", {
-        method: "POST",
-        body: JSON.stringify(payload)
-      });
-      setFeedback(response.message);
-    } catch (requestError) {
-      setError(requestError.message);
-    }
-  }
-
-  async function handleRoleUpdate(userId, role) {
-    try {
-      await apiFetch(`/admin/users/${userId}/role`, {
-        method: "PATCH",
-        body: JSON.stringify(role)
-      });
-      setFeedback("User role updated.");
-      await loadPortalData();
-    } catch (requestError) {
-      setError(requestError.message);
-    }
-  }
-
-  function editResource(resource) {
-    setResourceEditingId(resource.id);
-    setResourceForm({
-      title: resource.title,
-      description: resource.description,
-      type: resource.type,
-      contactLink: resource.contactLink || ""
-    });
-    setActivePage("resources");
-  }
-
-  function cancelResourceEdit() {
-    setResourceEditingId(null);
-    setResourceForm(emptyResourceForm());
-  }
-
-  const currentPage = availablePages.includes(activePage) ? activePage : "home";
 
   return (
     <div className="app-shell">
-      <div className="page-backdrop" aria-hidden="true" />
-
       <header className="site-header">
-        <div className="brand-block">
-          <div className="brand-mark">S</div>
+        <div className="brand-lockup">
+          <div className="brand-logo">L</div>
           <div>
-            <p className="brand-tag">Safe, informed, connected</p>
-            <h1>SafeHaven</h1>
+            <p className="brand-kicker">Smart loan workspace</p>
+            <h1 className="brand-name">Loaniverse</h1>
           </div>
         </div>
-
-        <nav className="site-nav" aria-label="Primary navigation">
-          {navItems.map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              className={item.key === currentPage ? "nav-link active" : "nav-link"}
-              onClick={() => setActivePage(item.key)}
-            >
-              {item.label}
-            </button>
-          ))}
-          {user && (
-            <button type="button" className="nav-link utility" onClick={handleLogout}>
-              Sign out
-            </button>
-          )}
+        <nav className="site-nav">
+          <span className="nav-pill">Secure Access</span>
+          <span className="nav-pill">Role-Based Dashboard</span>
         </nav>
       </header>
 
-      <main className="app-main">
-        {(feedback || error) && (
-          <div className={error ? "banner error" : "banner success"} role="status">
-            {error || feedback}
+      <main className="landing-layout">
+        <section className="hero-copy card">
+          <span className="eyebrow">Welcome to Loaniverse</span>
+          <h2>Manage lending, borrowing, approvals, and payments with a cleaner experience.</h2>
+          <p>
+            Sign in to continue, or create an account and jump into a focused dashboard designed
+            around your role.
+          </p>
+
+          <div className="hero-points">
+            <div className="hero-point">
+              <strong>For lenders</strong>
+              <span>Create loans and review incoming requests with clear actions.</span>
+            </div>
+            <div className="hero-point">
+              <strong>For borrowers</strong>
+              <span>Browse loan options, apply quickly, and track repayment activity.</span>
+            </div>
+            <div className="hero-point">
+              <strong>For admins and analysts</strong>
+              <span>See the bigger picture with organized views and simple summaries.</span>
+            </div>
           </div>
-        )}
+        </section>
 
-        {currentPage === "home" && (
-          <HomePage
-            user={user}
-            loading={loading}
-            resources={resources}
-            supportRequests={supportRequests}
-            adminUsers={adminUsers}
-            adminOverview={adminOverview}
-            onNavigate={setActivePage}
-            onRoleUpdate={handleRoleUpdate}
-          />
-        )}
-
-        {currentPage === "resources" && (
-          <ResourcesPage
-            user={user}
-            loading={loading}
-            resources={resources}
-            resourceForm={resourceForm}
-            resourceEditingId={resourceEditingId}
-            setResourceForm={setResourceForm}
-            onSaveResource={handleResourceSave}
-            onEditResource={editResource}
-            onDeleteResource={handleResourceDelete}
-            onCancelEdit={cancelResourceEdit}
-          />
-        )}
-
-        {currentPage === "support" && (
-          <SupportServicesPage
-            user={user}
-            loading={loading}
-            providers={providers}
-            supportRequests={supportRequests}
-            onCreateSupportRequest={handleSupportRequestCreate}
-            onStatusUpdate={handleSupportStatusUpdate}
-            onAddLegalAdvice={handleLegalAdvice}
-            onAddCounsellingNote={handleCounsellingNote}
-            onNavigate={setActivePage}
-          />
-        )}
-
-        {currentPage === "contact" && <ContactPage onSubmit={handleContact} />}
-
-        {currentPage === "login" && (
-          <AuthPage
-            mode="login"
-            onSubmit={(payload) => handleAuthentication("/auth/login", payload)}
-            onSwitch={() => setActivePage("register")}
-          />
-        )}
-
-        {currentPage === "register" && (
-          <AuthPage
-            mode="register"
-            onSubmit={(payload) => handleAuthentication("/auth/register", payload)}
-            onSwitch={() => setActivePage("login")}
-          />
-        )}
+        <section className="auth-panel">
+          {content}
+        </section>
       </main>
     </div>
   );

@@ -1,18 +1,4 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8080/api";
-const SESSION_KEY = "safehaven-session";
-
-function getSession() {
-  const raw = localStorage.getItem(SESSION_KEY);
-  return raw ? JSON.parse(raw) : null;
-}
-
-function saveSession(session) {
-  localStorage.setItem(SESSION_KEY, JSON.stringify(session));
-}
-
-function clearSession() {
-  localStorage.removeItem(SESSION_KEY);
-}
+const API_BASE_URL = "http://localhost:8080/api";
 
 async function handleResponse(response) {
   const data = await response.json().catch(() => ({}));
@@ -24,12 +10,10 @@ async function handleResponse(response) {
   return data;
 }
 
-async function apiFetch(path, options = {}) {
-  const session = getSession();
+export async function apiFetch(path, options = {}) {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     headers: {
       "Content-Type": "application/json",
-      ...(session?.token ? { Authorization: `Bearer ${session.token}` } : {}),
       ...(options.headers || {})
     },
     ...options
@@ -38,4 +22,4 @@ async function apiFetch(path, options = {}) {
   return handleResponse(response);
 }
 
-export { API_BASE_URL, apiFetch, clearSession, getSession, saveSession };
+export { API_BASE_URL };
